@@ -1,0 +1,21 @@
+{
+  "name": "weclash-server",
+  "version": "1.0.0",
+  "description": "WeClash signaling server for WebRTC communication",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "node index.js"
+  },
+  "dependencies": {
+    "ws": "^8.14.2"
+  },
+  "engines": {
+    "node": ">=16.0.0"
+  },
+  "keywords": ["websocket", "webrtc", "signaling", "game"],
+  "author": "",
+  "license": "MIT"
+}
+
+
