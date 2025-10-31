@@ -1,9 +1,17 @@
 const WebSocket = require('ws');
-const http = require('http');
+const https = require('https');
+const fs = require('fs');
 
 // Configuration
 const PORT = process.env.PORT || 8080;
 const HOST = '0.0.0.0';
+
+// SSL Configuration (read your SSL cert files)
+const sslOptions = {
+  key: fs.readFileSync('./private.key'),
+  cert: fs.readFileSync('./certificate.crt'),
+  ca: fs.readFileSync('./ca_bundle.crt')
+};
 
 // Room storage: Map<roomCode, { p1: WebSocket, p2: WebSocket }>
 const rooms = new Map();
@@ -11,13 +19,37 @@ const rooms = new Map();
 // Player storage: Map<WebSocket, { roomCode: string, role: 'p1' | 'p2' }>
 const players = new Map();
 
-// Create HTTP server (needed for WebSocket server)
-const server = http.createServer();
+// Create HTTPS server
+const server = https.createServer(sslOptions, (req, res) => {
+  if (req.url === '/health') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({
+      status: 'healthy',
+      uptime: process.uptime(),
+      timestamp: new Date().toISOString(),
+      activeRooms: rooms.size,
+      activePlayers: players.size,
+      connectedClients: wss.clients.size
+    }));
+  } else if (req.url === '/stats') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({
+      rooms: rooms.size,
+      players: players.size,
+      connections: wss.clients.size,
+      uptime: Math.floor(process.uptime()),
+      memory: process.memoryUsage()
+    }));
+  } else {
+    res.writeHead(200, { 'Content-Type': 'text/plain' });
+    res.end('WeClash Secure Signaling Server\n\nEndpoints:\n/health\n/stats\n\nWebSocket: wss://216.250.115.243:8080');
+  }
+});
 
-// Create WebSocket server
-const wss = new WebSocket.Server({ 
+// Create secure WebSocket server
+const wss = new WebSocket.Server({
   server,
-  perMessageDeflate: false,
+  perMessageDeflate: false
 });
 
 console.log(`🚀 WeClash Signaling Server starting...`);
@@ -114,9 +146,9 @@ function handleJoinRoom(ws, message) {
     rooms.set(code, room);
     playerRole = 'p1';
     players.set(ws, { roomCode: code, role: 'p1' });
-    
+
     console.log(`🏠 Room ${code} created by p1`);
-    
+
     send(ws, {
       type: 'room-created',
       code: code,
@@ -128,9 +160,9 @@ function handleJoinRoom(ws, message) {
     room.p2 = ws;
     playerRole = 'p2';
     players.set(ws, { roomCode: code, role: 'p2' });
-    
+
     console.log(`🤝 p2 joined room ${code}`);
-    
+
     // Notify both players
     send(ws, {
       type: 'room-joined',
@@ -157,7 +189,7 @@ function handleJoinRoom(ws, message) {
 
 function relayToOpponent(ws, message) {
   const playerData = players.get(ws);
-  
+
   if (!playerData) {
     sendError(ws, 'Not in a room');
     return;
@@ -171,7 +203,7 @@ function relayToOpponent(ws, message) {
 
   // Determine opponent
   const opponent = playerData.role === 'p1' ? room.p2 : room.p1;
-  
+
   if (!opponent) {
     console.log(`⚠️ No opponent to relay message to in room ${playerData.roomCode}`);
     return;
@@ -186,7 +218,7 @@ function relayToOpponent(ws, message) {
 
   // Relay the message
   send(opponent, message);
-  
+
   // Log specific message types for debugging
   if (message.type === 'hit') {
     console.log(`💥 Hit relayed in room ${playerData.roomCode}: ${message.hit?.part} for ${message.hit?.damage} damage`);
@@ -197,7 +229,7 @@ function relayToOpponent(ws, message) {
 
 function handleDisconnection(ws) {
   const playerData = players.get(ws);
-  
+
   if (!playerData) {
     return; // Player wasn't in a room
   }
@@ -208,7 +240,7 @@ function handleDisconnection(ws) {
   if (room) {
     // Notify opponent that peer left
     const opponent = role === 'p1' ? room.p2 : room.p1;
-    
+
     if (opponent && opponent.readyState === WebSocket.OPEN) {
       send(opponent, {
         type: 'peer-left'
@@ -257,16 +289,16 @@ function sendError(ws, errorMessage) {
 // Cleanup function for graceful shutdown
 function cleanup() {
   console.log('🧹 Cleaning up server...');
-  
+
   // Close all connections
   wss.clients.forEach((ws) => {
     ws.close();
   });
-  
+
   // Clear all rooms and players
   rooms.clear();
   players.clear();
-  
+
   console.log('✅ Cleanup complete');
 }
 
@@ -332,14 +364,14 @@ server.listen(PORT, HOST, () => {
 // Periodic cleanup of stale connections
 setInterval(() => {
   let removedConnections = 0;
-  
+
   wss.clients.forEach((ws) => {
     if (ws.readyState === WebSocket.CLOSED || ws.readyState === WebSocket.CLOSING) {
       handleDisconnection(ws);
       removedConnections++;
     }
   });
-  
+
   if (removedConnections > 0) {
     console.log(`🧹 Cleaned up ${removedConnections} stale connections`);
   }
